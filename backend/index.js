@@ -7,6 +7,8 @@ import multer from "multer";
 import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
+import net from "net";
+import dns from "dns";
 import { uploadRecipeImageToSupabase, deleteRecipeImageFromSupabase } from "./supabaseService.js";
 
 
@@ -27,6 +29,73 @@ const corsOptions = corsOrigin
   : {};
 app.use(cors(corsOptions));
 app.use(express.json());
+
+// -----------------------------
+// TEMPORARY TCP Diagnostic Endpoint
+app.get('/api/diag-tcp', async (req, res) => {
+  const dbHost = process.env.DB_HOST || '';
+  const dbPort = process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306;
+
+  let resolvedIps = [];
+  let dnsError = null;
+
+  try {
+    if (dbHost) {
+      const addresses = await dns.promises.resolve4(dbHost);
+      resolvedIps = addresses;
+    }
+  } catch (err) {
+    dnsError = err.code ? `${err.code}: ${err.message}` : (err.message || String(err));
+    try {
+      if (dbHost) {
+        const lookupResult = await dns.promises.lookup(dbHost, { all: true });
+        resolvedIps = lookupResult.map((a) => a.address);
+      }
+    } catch (lookupErr) {
+      dnsError += ` | lookup error: ${lookupErr.code ? lookupErr.code + ': ' : ''}${lookupErr.message || String(lookupErr)}`;
+    }
+  }
+
+  let tcpSuccess = false;
+  let tcpError = null;
+
+  if (dbHost) {
+    try {
+      await new Promise((resolve) => {
+        const socket = net.createConnection({ host: dbHost, port: dbPort, timeout: 5000 }, () => {
+          tcpSuccess = true;
+          socket.destroy();
+          resolve();
+        });
+
+        socket.on('error', (err) => {
+          tcpError = err.code ? `${err.code}: ${err.message}` : err.message;
+          socket.destroy();
+          resolve();
+        });
+
+        socket.on('timeout', () => {
+          tcpError = 'ETIMEDOUT: Connection timed out (5000ms)';
+          socket.destroy();
+          resolve();
+        });
+      });
+    } catch (err) {
+      tcpError = err.code ? `${err.code}: ${err.message}` : (err.message || String(err));
+    }
+  } else {
+    tcpError = 'DB_HOST environment variable is missing or empty';
+  }
+
+  res.json({
+    dbHost,
+    dbPort,
+    resolvedIps,
+    dnsError: dnsError || undefined,
+    tcpSuccess,
+    tcpError: tcpError || undefined,
+  });
+});
 
 // -----------------------------
 // Image upload setup
