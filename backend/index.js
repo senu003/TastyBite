@@ -29,21 +29,13 @@ app.use(cors(corsOptions));
 app.use(express.json());
 
 // -----------------------------
-// Image upload setup (save to backend uploads dir)
+// Image upload setup
 const uploadDir = path.join(process.cwd(), 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
 
 const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  },
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -547,7 +539,7 @@ app.post("/api/add-recipe", authenticateToken, (req, res, next) => {
   // Try uploading file to Supabase Storage if file is provided
   if (req.file) {
     try {
-      const fileBuffer = fs.readFileSync(req.file.path);
+      const fileBuffer = req.file.buffer || (req.file.path ? fs.readFileSync(req.file.path) : null);
       const supabasePublicUrl = await uploadRecipeImageToSupabase(
         fileBuffer,
         req.file.originalname,
@@ -557,11 +549,18 @@ app.post("/api/add-recipe", authenticateToken, (req, res, next) => {
       if (supabasePublicUrl) {
         finalImageUrl = supabasePublicUrl;
       } else {
-        finalImageUrl = `/images/${req.file.filename}`;
+        const filename = `${Date.now()}${path.extname(req.file.originalname || '')}`;
+        try {
+          if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+          fs.writeFileSync(path.join(uploadDir, filename), fileBuffer);
+          finalImageUrl = `/images/${filename}`;
+        } catch (localErr) {
+          console.error("Local upload fallback failed:", localErr);
+          if (req.file.filename) finalImageUrl = `/images/${req.file.filename}`;
+        }
       }
     } catch (err) {
-      console.error("Error reading file for upload:", err);
-      finalImageUrl = `/images/${req.file.filename}`;
+      console.error("Error processing file for upload:", err);
     }
   }
 
@@ -749,14 +748,25 @@ app.put('/api/recipes/:id', authenticateToken, (req, res, next) => {
     let finalImageUrl = recipeRows[0].image_url; // keep existing by default
     if (req.file) {
       try {
-        const fileBuffer = fs.readFileSync(req.file.path);
+        const fileBuffer = req.file.buffer || (req.file.path ? fs.readFileSync(req.file.path) : null);
         const supabaseUrl = await uploadRecipeImageToSupabase(
           fileBuffer, req.file.originalname, req.file.mimetype
         );
-        finalImageUrl = supabaseUrl || `/images/${req.file.filename}`;
+        if (supabaseUrl) {
+          finalImageUrl = supabaseUrl;
+        } else {
+          const filename = `${Date.now()}${path.extname(req.file.originalname || '')}`;
+          try {
+            if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
+            fs.writeFileSync(path.join(uploadDir, filename), fileBuffer);
+            finalImageUrl = `/images/${filename}`;
+          } catch (localErr) {
+            console.error("Local upload fallback failed:", localErr);
+            if (req.file.filename) finalImageUrl = `/images/${req.file.filename}`;
+          }
+        }
       } catch (err) {
         console.error('Image upload error during edit:', err);
-        finalImageUrl = `/images/${req.file.filename}`;
       }
     }
 
@@ -923,8 +933,14 @@ app.delete('/api/recipes/:id', authenticateToken, async (req, res) => {
 });
 
 // -----------------------------
-// Start server
+// Server Export / Startup
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-console.log('✅ Express server started');
+
+if (process.env.NODE_ENV !== 'test' && !process.env.VERCEL) {
+  app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  console.log('✅ Express server started');
+}
+
+export default app;
+
 
