@@ -162,6 +162,37 @@ app.get('/api/diag-db', async (req, res) => {
 });
 
 // -----------------------------
+// TEMPORARY Pool Diagnostic Endpoint
+app.get('/api/diag-pool', async (req, res) => {
+  let poolQuerySuccess = false;
+  let returnedRows = null;
+  let errorCode = null;
+  let errorMessage = null;
+  let errorErrno = null;
+  let errorSqlState = null;
+
+  try {
+    const [rows] = await pool.query('SELECT 1 AS test');
+    poolQuerySuccess = true;
+    returnedRows = rows;
+  } catch (err) {
+    errorCode = err.code || null;
+    errorMessage = err.message || String(err);
+    errorErrno = err.errno !== undefined ? err.errno : null;
+    errorSqlState = err.sqlState || null;
+  }
+
+  res.json({
+    poolQuerySuccess,
+    returnedRows,
+    errorCode,
+    errorMessage,
+    errorErrno,
+    errorSqlState,
+  });
+});
+
+// -----------------------------
 // Image upload setup
 const uploadDir = path.join(process.cwd(), 'uploads');
 
