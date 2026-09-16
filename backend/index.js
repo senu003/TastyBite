@@ -193,6 +193,45 @@ app.get('/api/diag-pool', async (req, res) => {
 });
 
 // -----------------------------
+// TEMPORARY Categories Diagnostic Endpoint
+app.get('/api/diag-categories', async (req, res) => {
+  let querySuccess = false;
+  let returnedRowCount = null;
+  let returnedRows = null;
+  let errorCode = null;
+  let errorMessage = null;
+  let errorErrno = null;
+  let errorSqlState = null;
+
+  try {
+    const [rows] = await pool.query(`
+      SELECT *
+      FROM categories
+      ORDER BY category_name
+    `);
+    querySuccess = true;
+    returnedRowCount = Array.isArray(rows) ? rows.length : null;
+    returnedRows = rows;
+  } catch (err) {
+    errorCode = err.code || null;
+    errorMessage = err.message || String(err);
+    errorErrno = err.errno !== undefined ? err.errno : null;
+    errorSqlState = err.sqlState || null;
+  }
+
+  res.json({
+    querySuccess,
+    returnedRowCount,
+    returnedRows,
+    errorCode,
+    errorMessage,
+    errorErrno,
+    errorSqlState,
+  });
+});
+
+
+// -----------------------------
 // Image upload setup
 const uploadDir = path.join(process.cwd(), 'uploads');
 
