@@ -10,6 +10,7 @@ import dotenv from "dotenv";
 import net from "net";
 import dns from "dns";
 import { uploadRecipeImageToSupabase, deleteRecipeImageFromSupabase } from "./supabaseService.js";
+import mysql from 'mysql2/promise';
 
 
 import jwt from 'jsonwebtoken';
@@ -94,6 +95,69 @@ app.get('/api/diag-tcp', async (req, res) => {
     dnsError: dnsError || undefined,
     tcpSuccess,
     tcpError: tcpError || undefined,
+  });
+});
+
+// -----------------------------
+// TEMPORARY MySQL Diagnostic Endpoint
+app.get('/api/diag-db', async (req, res) => {
+  const dbHost = process.env.DB_HOST || 'localhost';
+  const dbPort = process.env.DB_PORT ? Number(process.env.DB_PORT) : 3306;
+  const dbUser = process.env.DB_USER || 'root';
+  const dbName = process.env.DB_NAME || 'tastybite';
+  const dbSsl = process.env.DB_SSL;
+  const dbSslRejectUnauthorized = process.env.DB_SSL_REJECT_UNAUTHORIZED;
+
+  const sslConfig =
+    dbSsl === 'true' || dbHost.includes('aivencloud.com')
+      ? { rejectUnauthorized: dbSslRejectUnauthorized === 'true' }
+      : undefined;
+
+  let connectionSuccess = false;
+  let querySuccess = false;
+  let errorCode = null;
+  let errorMessage = null;
+  let errorErrno = null;
+  let errorSqlState = null;
+
+  let connection = null;
+  try {
+    connection = await mysql.createConnection({
+      host: dbHost,
+      user: dbUser,
+      password: process.env.DB_PASSWORD || '',
+      database: dbName,
+      port: dbPort,
+      ssl: sslConfig,
+      connectTimeout: 10000,
+    });
+    connectionSuccess = true;
+
+    await connection.query('SELECT 1');
+    querySuccess = true;
+  } catch (err) {
+    errorCode = err.code || null;
+    errorMessage = err.message || String(err);
+    errorErrno = err.errno !== undefined ? err.errno : null;
+    errorSqlState = err.sqlState || null;
+  } finally {
+    if (connection) {
+      try {
+        await connection.end();
+      } catch (closeErr) {
+        // ignore error when closing connection
+      }
+    }
+  }
+
+  res.json({
+    tcpDiagnostic: 'SUCCESS',
+    mysqlConnectionSuccess: connectionSuccess,
+    querySuccess: querySuccess,
+    errorCode,
+    errorMessage,
+    errorErrno,
+    errorSqlState,
   });
 });
 
